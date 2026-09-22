@@ -1,0 +1,39 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+.coverage
+htmlcov/
+
+# byte-compiled
+*$py.class
+
+# build output
+*.egg
+
+# test output
+.tox/
+
+# notebooks
+.ipynb_checkpoints/
+
+# env files (example and template files stay tracked)
+.env*
+!.env*.example
+!.env*.template
+
+# editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
