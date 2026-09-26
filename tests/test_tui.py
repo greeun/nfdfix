@@ -5,7 +5,7 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.widgets import DirectoryTree, SelectionList, Static
+from textual.widgets import DirectoryTree, Label, SelectionList, Static
 
 from nfdfix import tui
 from nfdfix.journal import read_records
@@ -438,3 +438,122 @@ async def test_unwritable_journal_renames_nothing_in_the_tui(tmp_path, home):
         assert listing(tmp_path) == before
         assert "cannot write the journal" in str(app.query_one("#status", Static).content)
         assert app.busy is False
+
+
+# -- appearance ---------------------------------------------------------
+
+
+def span_styles(content):
+    return [(span.start, span.end, str(span.style)) for span in content.spans]
+
+
+def test_entry_label_colors_the_kind_and_keeps_the_text():
+    item = RenameItem(parent="/p", old_name=NFD_FILE, new_name=NFC_FILE, kind="file")
+    label = tui.entry_label(RenameResult(item=item, status="would_rename"), "/p")
+    assert label.plain == "[file] " + NFD_FILE
+    assert span_styles(label) == [(0, 6, tui.KIND_STYLES["file"])]
+
+
+def test_entry_label_colors_the_status_and_dims_the_detail():
+    item = RenameItem(parent="/p", old_name=NFD_FILE, new_name=NFC_FILE, kind="file")
+    result = RenameResult(item=item, status=CONFLICT, detail="taken")
+    label = tui.entry_label(result, "/p")
+    assert label.plain == "[conflict] " + NFD_FILE + " (taken)"
+    end = len(label.plain)
+    assert span_styles(label) == [
+        (0, 10, tui.STATUS_STYLES[CONFLICT]),
+        (end - len("(taken)"), end, tui.DETAIL_STYLE),
+    ]
+
+
+def test_entry_label_keeps_brackets_in_names_as_text():
+    name = unicodedata.normalize("NFD", "[bold]굵게.txt")
+    item = RenameItem(parent="/p", old_name=name, new_name=name, kind="file")
+    label = tui.entry_label(RenameResult(item=item, status="would_rename"), "/p")
+    assert label.plain == "[file] " + name
+    assert len(label.spans) == 1
+
+
+async def test_panels_carry_titles_and_the_selection_count(tmp_path, home):
+    (tmp_path / NFD_FILE).write_text("내용", encoding="utf-8")
+    (tmp_path / NFD_DIR).mkdir()
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        entries = app.query_one("#entries", SelectionList)
+        assert app.query_one("#tree", DirectoryTree).border_title == "Folders"
+        assert entries.border_title == "Entries"
+        app.scan_directory(str(tmp_path))
+        await settle(app, pilot)
+        assert entries.border_subtitle == "2 of 2 selected"
+        await pilot.press("n")
+        await pilot.pause()
+        assert entries.border_subtitle == "0 of 2 selected"
+
+
+async def test_selection_count_drops_after_renaming(tmp_path, home):
+    (tmp_path / NFD_FILE).write_text("내용", encoding="utf-8")
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        app.scan_directory(str(tmp_path))
+        await settle(app, pilot)
+        await pilot.press("r")
+        await pilot.press("y")
+        await settle(app, pilot)
+        entries = app.query_one("#entries", SelectionList)
+        assert entries.border_subtitle == "0 of 1 selected"
+        assert span_styles(entries.get_option_at_index(0).prompt)[0][2] == tui.RENAMED_STYLE
+
+
+async def test_status_starts_with_the_mode_badge(tmp_path, home):
+    (tmp_path / NFD_FILE).write_text("내용", encoding="utf-8")
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        status = app.query_one("#status", Static)
+        assert str(status.content).startswith(" SCAN ")
+        assert span_styles(status.content)[0] == (0, 6, tui.MODE_STYLES["scan"])
+        app.scan_directory(str(tmp_path))
+        await settle(app, pilot)
+        assert str(status.content).startswith(" SCAN ")
+        app.show_undo_plan(
+            str(tmp_path / "journal.jsonl"),
+            [{"parent": str(tmp_path), "from": NFD_FILE, "to": NFC_FILE, "kind": "file"}],
+        )
+        await pilot.pause()
+        assert str(status.content).startswith(" UNDO ")
+
+
+async def test_empty_list_shows_a_hint(tmp_path, home):
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        empty = app.query_one("#empty", Static)
+        assert empty.display is True
+        assert "press enter to scan" in str(empty.content)
+        app.scan_directory(str(tmp_path))
+        await settle(app, pilot)
+        assert empty.display is True
+        assert "Nothing to normalize" in str(empty.content)
+
+
+async def test_hint_hides_when_entries_are_listed(tmp_path, home):
+    (tmp_path / NFD_FILE).write_text("내용", encoding="utf-8")
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        app.scan_directory(str(tmp_path))
+        await settle(app, pilot)
+        assert app.query_one("#empty", Static).display is False
+
+
+async def test_confirm_dialog_names_the_action_and_the_directory(tmp_path, home):
+    (tmp_path / NFD_FILE).write_text("내용", encoding="utf-8")
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        app.scan_directory(str(tmp_path))
+        await settle(app, pilot)
+        await pilot.press("r")
+        await pilot.pause()
+        dialog = app.screen.query_one("#dialog")
+        assert dialog.border_title == "Rename"
+        assert str(tmp_path) in str(app.screen.query_one("#message", Label).content)
