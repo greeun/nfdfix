@@ -219,6 +219,28 @@ async def test_rename_refreshes_the_tree_for_renamed_directories(tmp_path, home)
         assert await wait_for(pilot, lambda: tree_children(app) == [NFC_DIR])
 
 
+async def test_backspace_moves_the_tree_to_the_parent_directory(tmp_path, home):
+    start = tmp_path / "start"
+    start.mkdir()
+    (tmp_path / "sibling").mkdir()
+    app = make_app(start)
+    async with app.run_test() as pilot:
+        tree = app.query_one("#tree", DirectoryTree)
+        await pilot.press("backspace")
+        assert str(tree.path) == str(tmp_path)
+        assert await wait_for(pilot, lambda: sorted(tree_children(app)) == ["sibling", "start"])
+
+
+async def test_backspace_at_the_filesystem_root_stays_there(tmp_path, home):
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        tree = app.query_one("#tree", DirectoryTree)
+        tree.path = os.sep
+        await pilot.pause()
+        await pilot.press("backspace")
+        assert str(tree.path) == os.sep
+
+
 async def test_cancelled_rename_changes_nothing(tmp_path, home):
     (tmp_path / NFD_FILE).write_text("내용", encoding="utf-8")
     before = listing(tmp_path)

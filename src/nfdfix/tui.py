@@ -186,6 +186,7 @@ class NfdfixApp(App[int]):
         Binding("n", "select_none", "None"),
         Binding("r", "rename", "Rename"),
         Binding("u", "undo", "Undo"),
+        Binding("backspace", "parent", "Up"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -410,6 +411,18 @@ class NfdfixApp(App[int]):
             tree.path = moved
         elif any(item.kind == DIR for item in renamed):
             tree.reload()
+
+    # -- browsing ------------------------------------------------------
+
+    def action_parent(self) -> None:
+        """Move the tree up to the parent of the directory it shows."""
+        tree = self.query_one("#tree", FilteredDirectoryTree)
+        current = os.path.abspath(str(tree.path))
+        parent = os.path.dirname(current)
+        if parent == current:
+            self.notify("already at the top", severity="warning")
+            return
+        tree.path = parent
 
     # -- undo ------------------------------------------------------------
 
