@@ -557,3 +557,32 @@ async def test_confirm_dialog_names_the_action_and_the_directory(tmp_path, home)
         dialog = app.screen.query_one("#dialog")
         assert dialog.border_title == "Rename"
         assert str(tmp_path) in str(app.screen.query_one("#message", Label).content)
+
+
+async def test_question_mark_opens_and_closes_the_help(tmp_path, home):
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert len(app.screen_stack) == 1
+        await pilot.press("question_mark")
+        await pilot.pause()
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert len(app.screen_stack) == 1
+
+
+async def test_help_does_not_open_over_another_dialog(tmp_path, home):
+    (tmp_path / NFD_FILE).write_text("내용", encoding="utf-8")
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        app.scan_directory(str(tmp_path))
+        await settle(app, pilot)
+        await pilot.press("r")
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert isinstance(app.screen, tui.ConfirmScreen)
+        await pilot.press("escape")

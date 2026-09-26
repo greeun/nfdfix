@@ -203,6 +203,56 @@ class ConfirmScreen(ModalScreen[bool]):
 JournalChoice = Optional[Tuple[str, List[dict]]]
 
 
+HELP_KEYS = [
+    ("enter", "Scan the highlighted directory"),
+    ("backspace", "Show the parent directory in the tree"),
+    ("space", "Toggle the highlighted entry"),
+    ("a / n", "Select all / none"),
+    ("r", "Rename the selected entries (asks first)"),
+    ("u", "Choose a journal and restore the names it records"),
+    ("tab", "Switch between the tree and the list"),
+    ("?", "Show this help"),
+    ("q", "Quit"),
+]
+
+
+class HelpScreen(ModalScreen[None]):
+    """Lists the keys the interface understands."""
+
+    DEFAULT_CSS = """
+    HelpScreen { align: center middle; background: $background 60%; }
+    #help {
+        width: 72;
+        height: auto;
+        padding: 1 2;
+        border: round $accent;
+        border-title-color: $accent;
+        border-title-style: bold;
+        border-subtitle-color: $text-muted;
+        background: $surface;
+    }
+    .key { width: 12; color: $accent; text-style: bold; }
+    .action { width: 1fr; }
+    .row { height: auto; }
+    """
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("question_mark", "close", "Close"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="help") as dialog:
+            dialog.border_title = "Keys"
+            dialog.border_subtitle = "esc or ? close"
+            for key, action in HELP_KEYS:
+                with Horizontal(classes="row"):
+                    yield Label(Content(key), classes="key")
+                    yield Label(Content(action), classes="action")
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
 class JournalScreen(ModalScreen[JournalChoice]):
     """Lists journals and returns the chosen one with its records."""
 
@@ -286,6 +336,7 @@ class NfdfixApp(App[int]):
         Binding("r", "rename", "Rename"),
         Binding("u", "undo", "Undo"),
         Binding("backspace", "parent", "Up"),
+        Binding("question_mark", "help", "Help", key_display="?"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -601,6 +652,13 @@ class NfdfixApp(App[int]):
         self.journal_path = path
         self.base = os.path.commonpath([item.parent for item in items]) if items else os.getcwd()
         self.show_results(preview(items))
+
+    # -- help ------------------------------------------------------------
+
+    def action_help(self) -> None:
+        if len(self.screen_stack) > 1:
+            return
+        self.push_screen(HelpScreen())
 
     # -- leaving ---------------------------------------------------------
 

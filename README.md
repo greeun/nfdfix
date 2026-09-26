@@ -149,6 +149,7 @@ The left pane is a directory tree. Pick a directory and press enter to scan it; 
 | `r` | Rename the selected entries (asks first) |
 | `u` | Choose a journal and restore the names it records (asks first) |
 | `tab` | Switch between the tree and the list |
+| `?` | Show the key help |
 | `q` | Quit |
 
 `--exclude`, `--no-default-excludes`, `--include-hidden` and `--log` apply to the interactive mode as well. `--tui` cannot be combined with `--apply`, `--undo` or `--quiet`.
