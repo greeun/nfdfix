@@ -11,7 +11,7 @@ paths is therefore passed as Content, which is shown as written.
 import glob
 import os
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple, Union
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -35,13 +35,72 @@ from . import __version__
 from .apply import apply_items
 from .cli import exit_code
 from .journal import default_journal_path, read_records, undo_items
-from .models import CONFLICT, DIR, RENAMED, WOULD_RENAME, RenameItem, RenameResult
+from .models import (
+    CONFLICT,
+    DIR,
+    ERROR,
+    FILE,
+    MISSING,
+    PERMISSION_DENIED,
+    RENAMED,
+    SYMLINK,
+    VOLUME_REJECTED,
+    WOULD_RENAME,
+    RenameItem,
+    RenameResult,
+)
 from .plan import check_conflict
 from .report import describe, format_summary
 from .scanner import is_excluded, is_hidden, scan
 
 SCAN_MODE = "scan"
 UNDO_MODE = "undo"
+BUSY_MODE = "busy"
+
+# Styles are strings resolved against the theme, so they follow light and dark.
+# The $text-* variables are adjusted to stay readable on the background.
+KIND_STYLES = {FILE: "bold $text-primary", DIR: "bold $text-secondary", SYMLINK: "bold $text-accent"}
+RENAMED_STYLE = "bold $text-success"
+STATUS_STYLES = {
+    CONFLICT: "bold $text-warning",
+    MISSING: "bold $text-warning",
+    PERMISSION_DENIED: "bold $text-error",
+    VOLUME_REJECTED: "bold $text-error",
+    ERROR: "bold $text-error",
+}
+DETAIL_STYLE = "italic $text-muted"
+
+MODE_LABELS = {SCAN_MODE: " SCAN ", UNDO_MODE: " UNDO ", BUSY_MODE: " RENAMING "}
+MODE_STYLES = {
+    SCAN_MODE: "bold $text on $primary",
+    UNDO_MODE: "bold $text on $warning",
+    BUSY_MODE: "bold $text on $accent",
+}
+MUTED_STYLE = "$text-muted"
+
+START_HINT = "Select a directory on the left and press enter to scan it."
+
+
+def entry_label(result: RenameResult, base: str) -> Content:
+    """Render a result as in the command line output, with its label colored.
+
+    The text stays exactly what describe() prints; only spans are added, and
+    the name is never read as markup.
+    """
+    text = describe(result, base).strip()
+    label = Content(text)
+    end = text.index("]") + 1
+    if result.status == WOULD_RENAME:
+        style = KIND_STYLES.get(result.item.kind, "bold")
+    elif result.status == RENAMED:
+        style = RENAMED_STYLE
+    else:
+        style = STATUS_STYLES.get(result.status, "bold")
+    label = label.stylize(style, 0, end)
+    if result.detail and text.endswith(")"):
+        start = len(text) - len(result.detail) - 2
+        label = label.stylize(DETAIL_STYLE, start, len(text))
+    return label
 
 
 def preview(items: Sequence[RenameItem]) -> List[RenameResult]:
@@ -99,26 +158,37 @@ class ConfirmScreen(ModalScreen[bool]):
     """Asks before anything is changed on disk."""
 
     DEFAULT_CSS = """
-    ConfirmScreen { align: center middle; }
-    #dialog { width: 60; height: auto; padding: 1 2; border: thick $accent; background: $surface; }
-    #buttons { height: auto; align: center middle; }
-    #buttons Button { margin: 1 2 0 2; }
+    ConfirmScreen { align: center middle; background: $background 60%; }
+    #dialog {
+        width: 64;
+        height: auto;
+        padding: 1 2;
+        border: round $warning;
+        border-title-color: $warning;
+        border-title-style: bold;
+        background: $surface;
+    }
+    #message { width: 1fr; }
+    #buttons { height: auto; align: right middle; margin-top: 1; }
+    #buttons Button { margin-left: 2; }
     """
     BINDINGS = [
         Binding("y", "confirm", "Yes"),
         Binding("escape", "cancel", "Cancel"),
     ]
 
-    def __init__(self, message: str):
+    def __init__(self, heading: str, message: str):
         super().__init__()
+        self.heading = heading
         self.message = message
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="dialog"):
-            yield Label(self.message)
+        with Vertical(id="dialog") as dialog:
+            dialog.border_title = self.heading
+            yield Label(Content(self.message), id="message")
             with Horizontal(id="buttons"):
-                yield Button("Yes (y)", id="confirm", variant="primary")
                 yield Button("Cancel (esc)", id="cancel")
+                yield Button("Yes (y)", id="confirm", variant="warning")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "confirm")
@@ -137,8 +207,17 @@ class JournalScreen(ModalScreen[JournalChoice]):
     """Lists journals and returns the chosen one with its records."""
 
     DEFAULT_CSS = """
-    JournalScreen { align: center middle; }
-    #journals { width: 80%; height: 60%; border: thick $accent; background: $surface; }
+    JournalScreen { align: center middle; background: $background 60%; }
+    #journals {
+        width: 80%;
+        height: 60%;
+        padding: 0 1;
+        border: round $accent;
+        border-title-color: $accent;
+        border-title-style: bold;
+        border-subtitle-color: $text-muted;
+        background: $surface;
+    }
     """
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
@@ -151,7 +230,8 @@ class JournalScreen(ModalScreen[JournalChoice]):
 
     def on_mount(self) -> None:
         picker = self.query_one("#journals", OptionList)
-        picker.border_title = "choose a journal to undo (enter), escape to cancel"
+        picker.border_title = "Undo from a journal"
+        picker.border_subtitle = "enter choose · esc cancel"
         picker.highlighted = 0
         picker.focus()
 
@@ -176,10 +256,29 @@ class NfdfixApp(App[int]):
     TITLE = "nfdfix"
     SUB_TITLE = "v" + __version__
     CSS = """
-    Horizontal { height: 1fr; }
-    #tree { width: 2fr; border: solid $accent; }
-    #entries { width: 3fr; border: solid $accent; }
-    #status { height: 1; padding: 0 1; background: $panel; }
+    #main { height: 1fr; padding: 1 1 0 1; }
+    #tree { width: 2fr; }
+    #pane { width: 3fr; margin-left: 1; }
+    #entries, #empty { height: 1fr; }
+    #tree, #entries, #empty {
+        border: round $panel-lighten-2;
+        border-title-color: $text-muted;
+        border-subtitle-color: $text-muted;
+        background: $surface;
+    }
+    #tree:focus, #entries:focus {
+        border: round $accent;
+        border-title-color: $accent;
+        border-title-style: bold;
+    }
+    #empty { content-align: center middle; text-align: center; color: $text-muted; padding: 0 2; }
+    #status {
+        height: 1;
+        margin-top: 1;
+        background: $panel;
+        text-wrap: nowrap;
+        text-overflow: ellipsis;
+    }
     """
     BINDINGS = [
         Binding("a", "select_all", "All"),
@@ -211,13 +310,22 @@ class NfdfixApp(App[int]):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Horizontal():
+        with Horizontal(id="main"):
             yield FilteredDirectoryTree(
                 self.start, self.excludes, self.include_hidden, id="tree"
             )
-            yield SelectionList[RenameItem](id="entries")
-        yield Static("select a directory and press enter to scan", id="status")
+            with Vertical(id="pane"):
+                yield SelectionList[RenameItem](id="entries")
+                yield Static(Content(START_HINT), id="empty")
+        yield Static(id="status")
         yield Footer()
+
+    def on_mount(self) -> None:
+        self.query_one("#tree", FilteredDirectoryTree).border_title = "Folders"
+        for widget in (self.entries, self.query_one("#empty", Static)):
+            widget.border_title = "Entries"
+        self.show_hint(START_HINT)
+        self.set_status(self.start)
 
     # -- widgets ---------------------------------------------------------
 
@@ -225,11 +333,27 @@ class NfdfixApp(App[int]):
     def entries(self) -> SelectionList:
         return self.query_one("#entries", SelectionList)
 
-    def set_status(self, text: str) -> None:
-        self.query_one("#status", Static).update(Content(text))
+    def set_status(self, text: Union[str, Content]) -> None:
+        """Show the mode badge followed by the text; a str is never read as markup."""
+        mode = BUSY_MODE if self.busy else self.mode
+        if isinstance(text, str):
+            text = Content(text)
+        badge = (MODE_LABELS[mode], MODE_STYLES[mode])
+        self.query_one("#status", Static).update(Content.assemble(badge, " ", text))
+
+    def show_hint(self, text: str) -> None:
+        """Replace the empty list with a centered message."""
+        empty = self.query_one("#empty", Static)
+        empty.update(Content(text))
+        empty.display = True
+        self.entries.display = False
+
+    def show_list(self) -> None:
+        self.query_one("#empty", Static).display = False
+        self.entries.display = True
 
     def entry_label(self, result: RenameResult) -> Content:
-        return Content(describe(result, self.base).strip())
+        return entry_label(result, self.base)
 
     def refuse_while_busy(self) -> bool:
         """Warn and return True while a rename is running."""
@@ -254,6 +378,8 @@ class NfdfixApp(App[int]):
         self.base = path
         self.journal_path = None
         self.entries.clear_options()
+        self.entries.border_subtitle = ""
+        self.show_hint("Scanning {0} ...".format(path))
         self.set_status("scanning {0} ...".format(path))
         self.run_worker(
             lambda: self._scan(path, generation),
@@ -299,16 +425,31 @@ class NfdfixApp(App[int]):
                 )
             )
         self.entries.add_options(options)
+        if options:
+            self.show_list()
+        elif self.mode == UNDO_MODE:
+            self.show_hint("The journal records no renames.")
+        else:
+            self.show_hint("Nothing to normalize in {0}.".format(self.base))
         self.update_status()
 
     def update_status(self) -> None:
         count = self.entries.option_count
         selected = len(self.entries.selected)
-        text = "{0} item(s), {1} selected".format(count, selected)
+        self.entries.border_subtitle = "{0} of {1} selected".format(selected, count)
+        tally = "{0} item(s), {1} selected".format(count, selected)
+        conflicts = sum(1 for result in self.results if result.status == CONFLICT)
+        if conflicts:
+            # Placed before the path, which may be cut off at the right edge.
+            tally = Content.assemble(
+                tally,
+                (" · ", MUTED_STYLE),
+                ("{0} conflict(s)".format(conflicts), "bold $text-warning"),
+            )
         if self.mode == UNDO_MODE:
-            text = "undo: {0} · {1}".format(self.journal_path, text)
+            text = Content.assemble("undo: ", Content(self.journal_path or ""), " · ", tally)
         else:
-            text = "{0} · {1}".format(text, self.base)
+            text = Content.assemble(tally, " · ", Content(self.base))
         self.set_status(text)
 
     def on_selection_list_selected_changed(self, event) -> None:
@@ -336,8 +477,8 @@ class NfdfixApp(App[int]):
             self.notify("nothing is selected", severity="warning")
             return
         verb = "Restore" if self.mode == UNDO_MODE else "Rename"
-        message = "{0} {1} selected item(s)?".format(verb, len(selected))
-        self.push_screen(ConfirmScreen(message), callback=self._on_confirmed)
+        message = "{0} {1} selected item(s) in\n{2}?".format(verb, len(selected), self.base)
+        self.push_screen(ConfirmScreen(verb, message), callback=self._on_confirmed)
 
     def _on_confirmed(self, confirmed: Optional[bool]) -> None:
         if not confirmed:
@@ -385,6 +526,9 @@ class NfdfixApp(App[int]):
                 entries.deselect(option)
                 entries.replace_option_prompt_at_index(index, self.entry_label(outcome))
                 entries.disable_option_at_index(index)
+        entries.border_subtitle = "{0} of {1} selected".format(
+            len(entries.selected), entries.option_count
+        )
         self.follow_renames(results)
         self.last_results = list(results)
         text = format_summary(results, applied=True)
