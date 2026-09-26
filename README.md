@@ -6,13 +6,82 @@ macOS often stores filenames in NFD. When such a name travels through Windows, L
 
 ## Install
 
+### Requirements
+
+- Python 3.9 or later. The `python3` that ships with macOS is enough for the command line tool.
+- One of [uv](https://docs.astral.sh/uv/) or [pipx](https://pipx.pypa.io/), which install the command into its own environment and put it on your `PATH`. On macOS either can be installed with Homebrew:
+
+  ```
+  brew install uv
+  # or
+  brew install pipx
+  ```
+
+The package is not published on PyPI, so it is installed from a copy of the source:
+
+```
+git clone https://github.com/greeun/nfdfix.git
+cd nfdfix
+```
+
+### Install the command
+
+From the source directory:
+
 ```
 uv tool install .
 # or
 pipx install .
 ```
 
-The installed executable is named `nfdfix`, the same as the package. The project was previously called `nfd2nfc`; it was renamed because Homebrew and PyPI already ship unrelated tools under that name.
+To include the interactive interface, install the `tui` extra instead. It pulls in Textual, which may need a newer Python than 3.9.
+
+```
+uv tool install ".[tui]"
+# or
+pipx install ".[tui]"
+```
+
+The installed executable is named `nfdfix`, the same as the package. The project was previously called `nfd2nfc`; it was renamed because Homebrew and PyPI already ship unrelated tools under that name. If an older copy was installed under that name, remove it first so the two do not both claim the `nfdfix` executable:
+
+```
+uv tool uninstall nfd2nfc
+# or
+pipx uninstall nfd2nfc
+```
+
+If the shell reports `command not found` after installing, the tool directory is not on your `PATH` yet. Run `uv tool update-shell` or `pipx ensurepath`, then open a new terminal.
+
+Check the installation:
+
+```
+nfdfix --version
+```
+
+### Upgrade
+
+After pulling new changes into the source directory, install again over the existing copy:
+
+```
+git pull
+uv tool install --reinstall .
+# or
+pipx install --force .
+```
+
+Add `".[tui]"` in place of `.` when the interactive interface is installed.
+
+### Uninstall
+
+```
+uv tool uninstall nfdfix
+# or
+pipx uninstall nfdfix
+```
+
+Journals written by earlier runs stay in `~/.local/state/nfdfix/`; delete that directory as well if you no longer need to undo those renames.
+
+### Run without installing
 
 You can also run it straight from the source tree:
 
