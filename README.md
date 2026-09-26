@@ -74,6 +74,7 @@ The left pane is a directory tree. Pick a directory and press enter to scan it; 
 | Key | Action |
 |---|---|
 | `enter` | Scan the highlighted directory |
+| `backspace` | Show the parent directory in the tree |
 | `space` | Toggle the highlighted entry |
 | `a` / `n` | Select all / none |
 | `r` | Rename the selected entries (asks first) |
