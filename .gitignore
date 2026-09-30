@@ -37,3 +37,6 @@ htmlcov/
 
 # OS
 Thumbs.db
+
+# Synology links restored by mac-setup (lists/project-links.txt)
+/docs
